@@ -162,7 +162,9 @@
     clearResults();
 
     fetch(apiUrl + (apiUrl.indexOf("?") > -1 ? "&" : "?") + "tcole_pid=" + encodeURIComponent(pid), {
-      method: "GET"
+      method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: ""
     })
       .then(function (resp) {
         return resp.json().then(function (body) {
