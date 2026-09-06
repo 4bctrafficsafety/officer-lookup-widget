@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>4BC Officer Lookup Widget</title>
+<script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 14px;
+    color: #1b2437;
+    background: transparent;
+  }
+  #wrap { padding: 2px 0 8px 0; max-width: 480px; }
+  label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 14px;
+    border: 1px solid #c3c9d4;
+    border-radius: 4px;
+    outline: none;
+  }
+  input[type="text"]:focus {
+    border-color: #4b7bec;
+    box-shadow: 0 0 0 2px rgba(75,123,236,0.2);
+  }
+  #status {
+    margin-top: 6px;
+    min-height: 18px;
+    font-size: 12.5px;
+  }
+  #status.loading { color: #6b7280; }
+  #status.error { color: #c0392b; }
+  #status.found { color: #1e8e3e; }
+  #results {
+    margin-top: 10px;
+    display: none;
+    border: 1px solid #e2e5ea;
+    border-radius: 6px;
+    background: #f8f9fb;
+    padding: 10px 12px;
+  }
+  #results.show { display: block; }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px solid #eceef2;
+    font-size: 13px;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .k { color: #5a6472; }
+  .row .v { font-weight: 600; text-align: right; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <label for="pid">TCOLE PID</label>
+  <input type="text" id="pid" inputmode="numeric" autocomplete="off" placeholder="Enter TCOLE PID and press Tab or Enter">
+  <div id="status"></div>
+  <div id="results">
+    <div class="row"><span class="k">Officer Legal Name</span><span class="v" id="r_name">-</span></div>
+    <div class="row"><span class="k">Department / Agency</span><span class="v" id="r_agency">-</span></div>
+    <div class="row"><span class="k">Badge Number</span><span class="v" id="r_badge">-</span></div>
+    <div class="row"><span class="k">Patrol Unit / Plate Number</span><span class="v" id="r_plate">-</span></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var pidInput = document.getElementById("pid");
+  var statusEl = document.getElementById("status");
+  var resultsEl = document.getElementById("results");
+  var apiUrl = "";
+  var debounceTimer = null;
+  var lastLookedUpPid = null;
+
+  // Current widget value, submitted as a single JSON string.
+  var data = {
+    tcole_pid: "",
+    found: false,
+    officer_legal_name: "",
+    agency_name: "",
+    badge_number: "",
+    qb_vendor_id: "",
+    plate_number: ""
+  };
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text || "";
+    statusEl.className = cls || "";
+  }
+
+  function showResults(show) {
+    resultsEl.className = show ? "show" : "";
+  }
+
+  function resize() {
+    try {
+      if (window.JFCustomWidget) {
+        window.JFCustomWidget.requestFrameResize({
+          height: document.body.scrollHeight + 10
+        });
+      }
+    } catch (e) {}
+  }
+
+  function sendCurrentValue() {
+    try {
+      if (window.JFCustomWidget) {
+        window.JFCustomWidget.sendData({ value: JSON.stringify(data) });
+      }
+    } catch (e) {}
+  }
+
+  function clearResults() {
+    data.found = false;
+    data.officer_legal_name = "";
+    data.agency_name = "";
+    data.badge_number = "";
+    data.qb_vendor_id = "";
+    data.plate_number = "";
+    document.getElementById("r_name").textContent = "-";
+    document.getElementById("r_agency").textContent = "-";
+    document.getElementById("r_badge").textContent = "-";
+    document.getElementById("r_plate").textContent = "-";
+    showResults(false);
+    resize();
+  }
+
+  function doLookup(pid) {
+    data.tcole_pid = pid;
+
+    if (!pid) {
+      clearResults();
+      setStatus("", "");
+      lastLookedUpPid = null;
+      sendCurrentValue();
+      return;
+    }
+
+    if (!apiUrl) {
+      setStatus("Lookup is not configured for this form yet.", "error");
+      return;
+    }
+
+    if (pid === lastLookedUpPid) {
+      return;
+    }
+
+    lastLookedUpPid = pid;
+    setStatus("Looking up officer...", "loading");
+    clearResults();
+
+    fetch(apiUrl + (apiUrl.indexOf("?") > -1 ? "&" : "?") + "tcole_pid=" + encodeURIComponent(pid), {
+      method: "GET"
+    })
+      .then(function (resp) {
+        return resp.json().then(function (body) {
+          return { ok: resp.ok, status: resp.status, body: body };
+        });
+      })
+      .then(function (result) {
+        // Ignore stale responses if the officer kept typing a different PID.
+        if (pidInput.value.trim() !== pid) { return; }
+
+        if (result.ok && result.body && result.body.found) {
+          data.found = true;
+          data.officer_legal_name = result.body.officer_legal_name || "";
+          data.agency_name = result.body.agency_name || "";
+          data.badge_number = result.body.badge_number || "";
+          data.qb_vendor_id = result.body.qb_vendor_id || "";
+          data.plate_number = result.body.plate_number || "";
+
+          document.getElementById("r_name").textContent = data.officer_legal_name || "-";
+          document.getElementById("r_agency").textContent = data.agency_name || "-";
+          document.getElementById("r_badge").textContent = data.badge_number || "-";
+          document.getElementById("r_plate").textContent = data.plate_number || "-";
+          showResults(true);
+          setStatus("Officer found.", "found");
+        } else {
+          clearResults();
+          setStatus("No officer found in the roster for that TCOLE PID. Double-check the number.", "error");
+        }
+        resize();
+        sendCurrentValue();
+      })
+      .catch(function () {
+        if (pidInput.value.trim() !== pid) { return; }
+        clearResults();
+        setStatus("Could not reach the roster lookup. Check your connection and try again.", "error");
+        resize();
+        sendCurrentValue();
+      });
+  }
+
+  pidInput.addEventListener("input", function () {
+    var val = pidInput.value.trim();
+    data.tcole_pid = val;
+    sendCurrentValue();
+    if (debounceTimer) { clearTimeout(debounceTimer); }
+    if (!val) {
+      clearResults();
+      setStatus("", "");
+      lastLookedUpPid = null;
+      return;
+    }
+    debounceTimer = setTimeout(function () {
+      doLookup(val);
+    }, 600);
+  });
+
+  pidInput.addEventListener("blur", function () {
+    var val = pidInput.value.trim();
+    if (val) {
+      if (debounceTimer) { clearTimeout(debounceTimer); }
+      doLookup(val);
+    }
+  });
+
+  pidInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      var val = pidInput.value.trim();
+      if (val) {
+        if (debounceTimer) { clearTimeout(debounceTimer); }
+        doLookup(val);
+      }
+    }
+  });
+
+  if (window.JFCustomWidget) {
+    window.JFCustomWidget.subscribe("ready", function () {
+      apiUrl = window.JFCustomWidget.getWidgetSetting("apiUrl") || "";
+
+      // If the form is reloading a previously-submitted value (e.g. edit
+      // submission), restore it without re-calling the API.
+      try {
+        var existing = window.JFCustomWidget.getWidgetSetting("QRvalue") ||
+                        window.JFCustomWidget.getWidgetSetting("value");
+        if (existing) {
+          var parsed = JSON.parse(existing);
+          if (parsed && parsed.tcole_pid) {
+            data = parsed;
+            lastLookedUpPid = parsed.tcole_pid;
+            pidInput.value = parsed.tcole_pid;
+            if (parsed.found) {
+              document.getElementById("r_name").textContent = parsed.officer_legal_name || "-";
+              document.getElementById("r_agency").textContent = parsed.agency_name || "-";
+              document.getElementById("r_badge").textContent = parsed.badge_number || "-";
+              document.getElementById("r_plate").textContent = parsed.plate_number || "-";
+              showResults(true);
+              setStatus("Officer found.", "found");
+            }
+          }
+        }
+      } catch (e) {}
+
+      resize();
+    });
+
+    window.JFCustomWidget.subscribe("submit", function () {
+      window.JFCustomWidget.sendSubmit({
+        value: JSON.stringify(data),
+        valid: true
+      });
+    });
+  }
+
+  resize();
+})();
+</script>
+</body>
+</html>
